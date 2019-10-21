@@ -1,0 +1,164 @@
+globals [
+  ;;number of interactions by each strategy per round
+  num-violations
+  num-fulfills
+]
+
+turtles-own [
+  strategy
+  integrity-score
+  violate-now?
+  partnered?        ;;am I partnered?
+  partner           ;;WHO of my partner (nobody if not partnered)
+
+  total-interactions    ;; how many interactions have you participated in?
+
+  ;; history
+  been-violated-list
+  interactions-list
+]
+
+;;;;;;;;;;;;;;;;;;;;;;
+;;;Setup Procedures;;;
+;;;;;;;;;;;;;;;;;;;;;;
+
+to setup
+  clear-all
+  setup-turtles ;;setup the turtles and distribute them randomly
+  reset-ticks
+end
+
+;;setup the turtles and distribute them randomly
+to setup-turtles
+
+  ;; initialize turtles, integrity score is initialized from distribution and limited between [1, 0]
+  create-turtles n-fulfill [set strategy "fulfill" set color blue set integrity-score max ( list min ( list random-normal 0.995 0.005 1 ) 0 ) setup-common-variables]
+  create-turtles n-violate [set strategy "violate" set color red set integrity-score max ( list min ( list random-normal 0.1 0.1 1 ) 0 ) setup-common-variables]
+  create-turtles n-partial [set strategy "partial" set color yellow set integrity-score max ( list min ( list random-normal 0.5 0.2 1 ) 0 ) setup-common-variables]
+end
+
+;; helper to add some violators
+to add-violators
+  create-turtles violators-to-add [set strategy "violate" set color red set integrity-score max ( list min ( list random-normal 0.1 0.1 1 ) 0 ) setup-common-variables]
+end
+
+;;set the variables that all turtles share
+to setup-common-variables ;; turtle procedure
+  set partnered? false
+  set partner nobody
+  setxy random-xcor random-ycor
+  set violate-now? false
+  set total-interactions 0
+  set been-violated-list []
+  set interactions-list []
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;
+;;;Runtime Procedures;;;
+;;;;;;;;;;;;;;;;;;;;;;;;
+
+to go
+  clear-last-round
+
+  ;;have turtles try to find a partner
+  ask turtles [ partner-up ]
+
+  ;; the partnered turtles can play a round
+  let partnered-turtles turtles with [ partnered? ]
+  ask partnered-turtles [ play-a-round ]
+
+  ;; players might step out if they are annoyed because of too much violations
+  ask partnered-turtles [
+
+    ;; calculate the weighted fraction of violations, where recent ones are more important
+    if ( sum ( MAP * been-violated-list interactions-list )) / (( sum interactions-list) + 1)  > step-out-treshold and total-interactions > 5 and random-float 1.0 < 0.33 [
+      die
+    ]
+  ]
+
+  ;; policy to kick bad players out is actived when the 8% boundry is exceeded and the policy is enabled
+  if num-violations / ( num-violations + num-fulfills + 0.0001) > 0.08 and kickout? [
+
+    ;; determine the lowest integrity score in the field and remove turtle(s)
+    let min-integrity min ( [integrity-score] of turtles )
+    ask turtles with [integrity-score = min-integrity] [ die ]
+  ]
+
+  ;; update tick
+  tick
+end
+
+;; clear the last round
+to clear-last-round
+  let partnered-turtles turtles with [ partnered? ]
+  ask partnered-turtles [ release-partners ]
+
+  ;; reset counts
+  set num-violations 0
+  set num-fulfills 0
+end
+
+;;release partner and turn around to leave
+to release-partners
+  set partnered? false
+  set partner nobody
+  rt 180
+end
+
+;;have turtles try to find a partner
+;;Since other turtles that have already executed partner-up may have
+;;caused the turtle executing partner-up to be partnered,
+;;a check is needed to make sure the calling turtle isn't partnered.
+to partner-up ;;turtle procedure
+  if (not partnered?) [              ;;make sure still not partnered
+    rt (random-float 90 - random-float 90) fd 1     ;;move around randomly
+    set partner one-of (turtles-at -1 0) with [ not partnered? ]
+    if partner != nobody and ( random-float 1.0 < [integrity-score] of partner ) [              ;;if successful grabbing a partner, partner up
+      set partnered? true
+      set heading 270                   ;;face partner
+      ask partner [
+        set partnered? true
+        set partner myself
+        set heading 90
+      ]
+    ]
+  ]
+end
+
+;; play the round
+to play-a-round ;;turtle procedure
+
+  ;; determine wether or not the turtle will violate
+  ifelse (random-float 1.0 < integrity-score) [
+    set violate-now? false
+    set num-fulfills num-fulfills + 1
+  ] [
+    set violate-now? true
+    set num-violations num-violations + 1
+  ]
+
+  ;; update the integrity score
+  ifelse violate-now? [
+    set integrity-score integrity-score + -1 * integrity-score * 0.1
+  ] [
+    set integrity-score integrity-score + ( 1 - integrity-score ) * 0.1
+  ]
+
+  ;; change color depending on the integrity score
+  set color scale-color red integrity-score 0 1
+  if integrity-score > 0.75 [set color blue]
+
+  ;; store wether or not you have been violated
+  ifelse [violate-now?] of partner [
+    set been-violated-list lput 1 been-violated-list
+  ] [
+    set been-violated-list lput 0 been-violated-list
+  ]
+
+  ;; update the stats
+  set total-interactions total-interactions + 1
+  set interactions-list lput total-interactions interactions-list
+end
+
+; Copyright 2002 Uri Wilensky.
+; See Info tab for full copyright and license.
